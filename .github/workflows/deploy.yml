@@ -14,19 +14,29 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2_key
-          chmod 600 ~/.ssh/ec2_key
-          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+          set -eu
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$EC2_SSH_KEY" > "$HOME/.ssh/ec2_key"
+          chmod 600 "$HOME/.ssh/ec2_key"
+          ssh-keyscan -H "$EC2_HOST" >> "$HOME/.ssh/known_hosts"
 
       - name: Deploy to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
-          ssh -i ~/.ssh/ec2_key ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            cd app
-            git pull origin main
-            docker build -t fastapi-app .
-            docker stop fastapi-app || true
-            docker rm fastapi-app || true
-            docker run -d --name fastapi-app -p 8000:8000 fastapi-app
+          set -eu
+          ssh -i "$HOME/.ssh/ec2_key" \
+            -o StrictHostKeyChecking=yes \
+            "ubuntu@$EC2_HOST" << 'EOF'
+              set -eu
+              cd app
+              git pull origin main
+              docker build -t fastapi-app .
+              docker stop fastapi-app || true
+              docker rm fastapi-app || true
+              docker run -d --name fastapi-app -p 8000:8000 fastapi-app
           EOF
