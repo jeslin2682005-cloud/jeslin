@@ -1,40 +1,63 @@
-name: Deploy FastAPI to EC2
+
+name: Build and Deploy FastAPI
 
 on:
   push:
     branches:
       - main
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure SSH
-        env:
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-        run: |
-          set -eu
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$EC2_SSH_KEY" > "$HOME/.ssh/ec2_key"
-          chmod 600 "$HOME/.ssh/ec2_key"
-          ssh-keyscan -H "$EC2_HOST" >> "$HOME/.ssh/known_hosts"
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Deploy to EC2
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          set -eu
-          ssh -i "$HOME/.ssh/ec2_key" \
-            -o StrictHostKeyChecking=yes \
-            "ubuntu@$EC2_HOST" << 'EOF'
-              set -eu
-              cd app
-              git pull origin main
+          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
+          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+          docker tag $REGISTRY/$REPOSITORY:$IMAGE_TAG $REGISTRY/$REPOSITORY:latest
+          docker push $REGISTRY/$REPOSITORY:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 333033966050.dkr.ecr.eu-north-1.amazonaws.com
+            docker pull 333033966050.dkr.ecr.eu-north-1.amazonaws.com/jeslin:latest
+            docker stop fastapi-app || true
+            docker rm fastapi-app || true
+            docker run -d --name fastapi-app --restart unless-stopped -p 80:8000 333033966050.dkr.ecr.eu-north-1.amazonaws.com/jeslin:latest
+
               docker build -t fastapi-app .
               docker stop fastapi-app || true
               docker rm fastapi-app || true
