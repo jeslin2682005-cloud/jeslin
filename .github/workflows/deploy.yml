@@ -22,7 +22,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: eu-north-1
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -31,7 +31,7 @@ jobs:
       - name: Build and push Docker image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          REPOSITORY: jeslin
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
@@ -58,8 +58,3 @@ jobs:
             docker rm fastapi-app || true
             docker run -d --name fastapi-app --restart unless-stopped -p 80:8000 333033966050.dkr.ecr.eu-north-1.amazonaws.com/jeslin:latest
 
-              docker build -t fastapi-app .
-              docker stop fastapi-app || true
-              docker rm fastapi-app || true
-              docker run -d --name fastapi-app -p 8000:8000 fastapi-app
-          EOF
